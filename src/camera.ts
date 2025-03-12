@@ -54,38 +54,38 @@ export class Camera {
     );
   }
 
-  render(world: Hittable) {
+  async doPixel(i: number, j: number, world: Hittable) {
+    console.log(`Rendering pixel ${i},${j}`);
+    let pixelColor = vec3(0, 0, 0);
+
+    for (let sample = 0; sample < this.samplesPerPixel; sample++) {
+      const r = this.getRay(i, j);
+      pixelColor = pixelColor.add(this.rayColor(r, world));
+    }
+
+    writeColor(this.ctx, pixelColor.k(this.pixelSamplesScale), j, i);
+  }
+
+  async render(world: Hittable) {
+    const stack: (() => ReturnType<typeof this.doPixel>)[] = [];
+
     for (let j = 0; j <= this.height - 1; j++) {
-      console.log(`Rendering scanline ${j}`);
       for (let i = 0; i <= this.width - 1; i++) {
-        let pixelColor = vec3(0, 0, 0);
-
-        for (let sample = 0; sample < this.samplesPerPixel; sample++) {
-          const r = this.getRay(i, j);
-          pixelColor = pixelColor.add(this.rayColor(r, world));
-        }
-
-        // const pixelCenter = this.pixel00Loc
-        //   .add(this.pixelDeltaU.k(i))
-        //   .add(this.pixelDeltaV.k(j));
-        // const rayDirection = pixelCenter.sub(this.cameraCenter);
-        //
-        // const r = ray(this.cameraCenter, rayDirection);
-        //
-        // const color = this.rayColor(r, world);
-
-        writeColor(this.ctx, pixelColor.k(this.pixelSamplesScale), j, i);
+        stack.push(() => this.doPixel(i, j, world));
       }
     }
+
+    await Promise.all(stack.map((fn) => fn()));
     console.log("Done!");
   }
 
-  rayColor(r: Ray, world: Hittable) {
+  rayColor(r: Ray, world: Hittable): Vec3 {
     const rec = new HitRecord();
 
     const [hasHit, resultRec] = world.hit(r, interval(0, Infinity), rec);
     if (hasHit) {
-      return resultRec.normal!.add(color(1, 1, 1)).div(2);
+      const direction = Vec3.randomOnHemisphere(resultRec.normal!);
+      return this.rayColor(ray(resultRec.p!, direction), world).k(0.5);
     }
 
     const unitDirection = r.direction.unit;

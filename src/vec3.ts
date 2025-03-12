@@ -1,3 +1,5 @@
+import { randomBetween, randomNum } from "./utils";
+
 export function vec3(x: number, y: number, z: number) {
   return new Vec3(x, y, z);
 }
@@ -84,5 +86,37 @@ export class Vec3 {
 
   static dot(v: Vec3, u: Vec3): number {
     return v.x * u.x + v.y * u.y + v.z * u.z;
+  }
+
+  static random() {
+    return vec3(randomNum(), randomNum(), randomNum());
+  }
+
+  static randomBetween(min: number, max: number) {
+    return vec3(
+      randomBetween(min, max),
+      randomBetween(min, max),
+      randomBetween(min, max),
+    );
+  }
+
+  static randomUnitVector() {
+    while (true) {
+      const p = this.randomBetween(-1, 1);
+      const { lengthSquared } = p;
+      // Javascript numbers are double (64-bit) so we can use the same value for minimum
+      if (1e-160 < lengthSquared && lengthSquared <= 1) {
+        return p.div(Math.sqrt(lengthSquared));
+      }
+    }
+  }
+
+  static randomOnHemisphere(normal: Vec3) {
+    const onUnitSphere = this.randomUnitVector();
+    if (this.dot(onUnitSphere, normal) > 0.0) {
+      return onUnitSphere;
+    } else {
+      return onUnitSphere.k(-1);
+    }
   }
 }
