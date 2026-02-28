@@ -1,31 +1,25 @@
-export function interval(min: number, max: number) {
-  return new Interval(min, max);
+export interface Interval {
+  min: number;
+  max: number;
 }
 
-export class Interval {
-  constructor(
-    public min: number,
-    public max: number,
-  ) {}
-
-  get size() {
-    return this.max - this.min;
-  }
-
-  contains(x: number) {
-    return this.min <= x && x <= this.max;
-  }
-
-  surrounds(x: number) {
-    return this.min < x && x < this.max;
-  }
-
-  clamp(x: number) {
-    if (x < this.min) return this.min;
-    if (x < this.max) return this.max;
-    return x;
-  }
-
-  static empty = new Interval(Infinity, -Infinity);
-  static universe = new Interval(-Infinity, +Infinity);
+export function interval(min: number, max: number): Interval {
+  return { min, max };
 }
+
+export function intervalContains(i: Interval, x: number): boolean {
+  return i.min <= x && x <= i.max;
+}
+
+export function intervalSurrounds(i: Interval, x: number): boolean {
+  return i.min < x && x < i.max;
+}
+
+export function intervalClamp(i: Interval, x: number): number {
+  if (x < i.min) return i.min;
+  if (x > i.max) return i.max;
+  return x;
+}
+
+export const INTERVAL_EMPTY: Interval = { min: Infinity, max: -Infinity };
+export const INTERVAL_UNIVERSE: Interval = { min: -Infinity, max: Infinity };

@@ -1,108 +1,112 @@
-import { HitRecord } from "./hittable";
-import { ray, Ray } from "./ray";
-import { Ref } from "./ref";
+import { Ray, ray } from "./ray";
 import { randomNum } from "./utils";
-import { color, Vec3 } from "./vec3";
+import {
+  Vec3,
+  color,
+  vecDot,
+  vecK,
+  vecAdd,
+  vecNearZero,
+  vecReflect,
+  vecRefract,
+  vecRandomUnitVector,
+  vecUnit,
+} from "./vec3";
 
-export abstract class Material {
-  abstract scatter(
-    rayIn: Ref<Ray>,
-    rec: HitRecord,
-    attenuation: Ref<Vec3>,
-    scattered: Ref<Ray>,
-  ): boolean;
+export type Material =
+  | { type: "lambertian"; albedo: Vec3 }
+  | { type: "metal"; albedo: Vec3; fuzz: number }
+  | { type: "dielectric"; refractionIndex: number };
+
+export function lambertian(albedo: Vec3): Material {
+  return { type: "lambertian", albedo };
 }
 
-export class Lambertian extends Material {
-  constructor(public albedo: Vec3) {
-    super();
-  }
-
-  override scatter(
-    _rayIn: Ref<Ray>,
-    rec: HitRecord,
-    attenuation: Ref<Vec3>,
-    scattered: Ref<Ray>,
-  ): boolean {
-    let scatterDirection = rec.normal!.add(Vec3.randomUnitVector());
-
-    if (scatterDirection.nearZero()) {
-      scatterDirection = rec.normal!.clone();
-    }
-
-    scattered.value = ray(rec.p!, scatterDirection);
-    attenuation.value = this.albedo;
-    return true;
-  }
+export function metal(albedo: Vec3, fuzz: number): Material {
+  return { type: "metal", albedo, fuzz: fuzz < 1 ? fuzz : 1 };
 }
 
-export class Metal extends Material {
-  fuzz: number;
-  constructor(
-    public albedo: Vec3,
-    fuzz: number,
-  ) {
-    super();
+export function dielectric(refractionIndex: number): Material {
+  return { type: "dielectric", refractionIndex };
+}
 
-    this.fuzz = fuzz < 1 ? fuzz : 1;
-  }
+export interface ScatterResult {
+  scattered: Ray;
+  attenuation: Vec3;
+}
 
-  override scatter(
-    rayIn: Ref<Ray>,
-    rec: HitRecord,
-    attenuation: Ref<Vec3>,
-    scattered: Ref<Ray>,
-  ): boolean {
-    let reflected = Vec3.reflect(rayIn.value!.direction, rec.normal!);
-    reflected = reflected.unit.add(Vec3.randomUnitVector().k(this.fuzz));
-    scattered.value = ray(rec.p!, reflected);
-    attenuation.value = this.albedo;
-    return Vec3.dot(scattered.value.direction!, rec.normal!) > 0;
+export function scatter(
+  material: Material,
+  rayIn: Ray,
+  recP: Vec3,
+  recNormal: Vec3,
+  recFrontFace: boolean,
+): ScatterResult | null {
+  switch (material.type) {
+    case "lambertian":
+      return scatterLambertian(material.albedo, recP, recNormal);
+    case "metal":
+      return scatterMetal(material.albedo, material.fuzz, rayIn, recP, recNormal);
+    case "dielectric":
+      return scatterDielectric(material.refractionIndex, rayIn, recP, recNormal, recFrontFace);
   }
 }
 
-export class Dialectric extends Material {
-  constructor(public refractionIndex: number) {
-    super();
+function scatterLambertian(
+  albedo: Vec3,
+  p: Vec3,
+  normal: Vec3,
+): ScatterResult {
+  let scatterDirection = vecAdd(normal, vecRandomUnitVector());
+  if (vecNearZero(scatterDirection)) {
+    scatterDirection = normal;
+  }
+  return { scattered: ray(p, scatterDirection), attenuation: albedo };
+}
+
+function scatterMetal(
+  albedo: Vec3,
+  fuzz: number,
+  rayIn: Ray,
+  p: Vec3,
+  normal: Vec3,
+): ScatterResult | null {
+  let reflected = vecReflect(rayIn.direction, normal);
+  reflected = vecAdd(vecUnit(reflected), vecK(vecRandomUnitVector(), fuzz));
+  const scattered = ray(p, reflected);
+  if (vecDot(scattered.direction, normal) > 0) {
+    return { scattered, attenuation: albedo };
+  }
+  return null;
+}
+
+function scatterDielectric(
+  refractionIndex: number,
+  rayIn: Ray,
+  p: Vec3,
+  normal: Vec3,
+  frontFace: boolean,
+): ScatterResult {
+  const attenuation = color(1, 1, 1);
+  const ri = frontFace ? 1.0 / refractionIndex : refractionIndex;
+  const unitDirection = vecUnit(rayIn.direction);
+
+  const cosTheta = Math.min(vecDot(vecK(unitDirection, -1), normal), 1.0);
+  const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
+  const cannotRefract = ri * sinTheta > 1;
+
+  let direction: Vec3;
+  if (cannotRefract || reflectance(cosTheta, ri) > randomNum()) {
+    direction = vecReflect(unitDirection, normal);
+  } else {
+    direction = vecRefract(unitDirection, normal, ri);
   }
 
-  scatter(
-    rayIn: Ref<Ray>,
-    rec: HitRecord,
-    attenuation: Ref<Vec3>,
-    scattered: Ref<Ray>,
-  ): boolean {
-    attenuation.value = color(1, 1, 1);
+  return { scattered: ray(p, direction), attenuation };
+}
 
-    const ri = rec.frontFace!
-      ? 1.0 / this.refractionIndex
-      : this.refractionIndex;
-
-    const unitDirection = rayIn.value!.direction.unit;
-
-    const cosTheta = Math.min(Vec3.dot(unitDirection.k(-1), rec.normal!), 1.0);
-    const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
-
-    const cannotRefract = ri * sinTheta > 1;
-
-    let direction: Vec3;
-
-    if (cannotRefract || this.reflectance(cosTheta, ri) > randomNum()) {
-      direction = Vec3.reflect(unitDirection, rec.normal!);
-    } else {
-      direction = Vec3.refract(unitDirection, rec.normal!, ri);
-    }
-
-    scattered.value = ray(rec.p!, direction);
-
-    return true;
-  }
-
-  reflectance(cosine: number, refractionIndex: number) {
-    // Schlick's approximation
-    let r0 = (1 - refractionIndex) / (1 + refractionIndex);
-    r0 = r0 * r0;
-
-    return r0 + (1 - r0) * Math.pow(1 - cosine, 5);
-  }
+function reflectance(cosine: number, refractionIndex: number): number {
+  let r0 = (1 - refractionIndex) / (1 + refractionIndex);
+  r0 = r0 * r0;
+  return r0 + (1 - r0) * Math.pow(1 - cosine, 5);
 }

@@ -1,24 +1,30 @@
 import { writeColor } from "./color";
-import { HitRecord, Hittable } from "./hittable";
+import { hittableListHit } from "./hittable-list";
 import { interval } from "./interval";
+import { scatter } from "./material";
 import { ray, Ray } from "./ray";
-import { ref, Ref } from "./ref";
+import { Sphere } from "./sphere";
 import { degreesToRadians, randomNum } from "./utils";
-import { color, point3, Vec3, vec3 } from "./vec3";
+import {
+  Vec3,
+  vec3,
+  color,
+  point3,
+  vecAdd,
+  vecCross,
+  vecDiv,
+  vecK,
+  vecMul,
+  vecRandomInUnitDisk,
+  vecSub,
+  vecUnit,
+} from "./vec3";
 
 const sampleSquare = () => vec3(randomNum() - 0.5, randomNum() - 0.5, 0);
 
-export class Camera {
-  height: number;
-  pixel00Loc!: Vec3;
-  pixelDeltaU!: Vec3;
-  pixelDeltaV!: Vec3;
-  cameraCenter!: Vec3;
-  pixelSamplesScale: number;
-  canvas: HTMLCanvasElement;
-  ctx: CanvasRenderingContext2D;
+export interface CameraConfig {
   width: number;
-  aspectRatio: number;
+  height: number;
   samplesPerPixel: number;
   maxDepth: number;
   vfov: number;
@@ -27,8 +33,102 @@ export class Camera {
   vUp: Vec3;
   defocusAngle: number;
   focusDist: number;
-  defocusDiskU!: Vec3;
-  defocusDiskV!: Vec3;
+}
+
+export interface CameraState {
+  config: CameraConfig;
+  pixel00Loc: Vec3;
+  pixelDeltaU: Vec3;
+  pixelDeltaV: Vec3;
+  cameraCenter: Vec3;
+  pixelSamplesScale: number;
+  defocusDiskU: Vec3;
+  defocusDiskV: Vec3;
+}
+
+export function initCamera(config: CameraConfig): CameraState {
+  const cameraCenter = config.lookFrom;
+
+  const theta = degreesToRadians(config.vfov);
+  const h = Math.tan(theta / 2);
+  const viewportHeight = 2.0 * h * config.focusDist;
+  const viewportWidth = viewportHeight * (config.width / config.height);
+
+  const w = vecUnit(vecSub(config.lookFrom, config.lookAt));
+  const u = vecUnit(vecCross(config.vUp, w));
+  const v = vecCross(w, u);
+
+  const viewportU = vecK(u, viewportWidth);
+  const viewportV = vecK(v, -viewportHeight);
+
+  const pixelDeltaU = vecDiv(viewportU, config.width);
+  const pixelDeltaV = vecDiv(viewportV, config.height);
+
+  const viewportUpperLeft = vecSub(
+    vecSub(vecSub(cameraCenter, vecK(w, config.focusDist)), vecDiv(viewportU, 2)),
+    vecDiv(viewportV, 2),
+  );
+  const pixel00Loc = vecAdd(viewportUpperLeft, vecDiv(vecAdd(pixelDeltaU, pixelDeltaV), 2));
+
+  const defocusRadius =
+    config.focusDist * Math.tan(degreesToRadians(config.defocusAngle / 2));
+  const defocusDiskU = vecK(u, defocusRadius);
+  const defocusDiskV = vecK(v, defocusRadius);
+
+  return {
+    config,
+    pixel00Loc,
+    pixelDeltaU,
+    pixelDeltaV,
+    cameraCenter,
+    pixelSamplesScale: 1 / config.samplesPerPixel,
+    defocusDiskU,
+    defocusDiskV,
+  };
+}
+
+export function getRay(cam: CameraState, i: number, j: number): Ray {
+  const offset = sampleSquare();
+
+  const pixelSample = vecAdd(
+    vecAdd(cam.pixel00Loc, vecK(cam.pixelDeltaU, i + offset.x)),
+    vecK(cam.pixelDeltaV, j + offset.y),
+  );
+
+  const rayOrigin =
+    cam.config.defocusAngle <= 0 ? cam.cameraCenter : defocusDiskSample(cam);
+  const rayDirection = vecSub(pixelSample, rayOrigin);
+
+  return ray(rayOrigin, rayDirection);
+}
+
+function defocusDiskSample(cam: CameraState): Vec3 {
+  const p = vecRandomInUnitDisk();
+  return vecAdd(vecAdd(cam.cameraCenter, vecK(cam.defocusDiskU, p.x)), vecK(cam.defocusDiskV, p.y));
+}
+
+export function rayColor(r: Ray, depth: number, world: Sphere[]): Vec3 {
+  if (depth <= 0) return color(0, 0, 0);
+
+  const [hasHit, rec] = hittableListHit(world, r, interval(0.0001, Infinity));
+  if (hasHit) {
+    const result = scatter(rec.material, r, rec.p, rec.normal, rec.frontFace);
+    if (result) {
+      return vecMul(rayColor(result.scattered, depth - 1, world), result.attenuation);
+    }
+    return color(0, 0, 0);
+  }
+
+  const unitDirection = vecUnit(r.direction);
+  const a = 0.5 * (unitDirection.y + 1.0);
+
+  return vecAdd(vecK(color(1.0, 1.0, 1.0), 1 - a), vecK(color(0.5, 0.7, 1.0), a));
+}
+
+export class Camera {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  state: CameraState;
 
   constructor({
     width = 800,
@@ -56,131 +156,47 @@ export class Camera {
     const canvas = document.querySelector("canvas");
     if (!canvas) throw new Error("No canvas");
     this.canvas = canvas;
-    const ctx = this.canvas?.getContext("2d");
+    const ctx = this.canvas.getContext("2d");
     if (!ctx) throw new Error("No ctx");
     this.ctx = ctx;
 
-    this.width = width;
-    this.aspectRatio = aspectRatio;
-    this.samplesPerPixel = samplesPerPixel;
-    this.maxDepth = maxDepth;
-
-    // Image
-    this.height = Math.floor(width / aspectRatio);
+    const height = Math.floor(width / aspectRatio);
     this.canvas.width = width;
-    this.canvas.height = this.height;
+    this.canvas.height = height;
 
-    this.pixelSamplesScale = 1 / samplesPerPixel;
-
-    this.vfov = vfov;
-    this.lookFrom = lookFrom;
-    this.lookAt = lookAt;
-    this.vUp = vUp;
-    this.defocusAngle = defocusAngle;
-    this.focusDist = focusDist;
-
-    this.initialize();
+    this.state = initCamera({
+      width,
+      height,
+      samplesPerPixel,
+      maxDepth,
+      vfov,
+      lookFrom,
+      lookAt,
+      vUp,
+      defocusAngle,
+      focusDist,
+    });
   }
 
-  initialize() {
-    this.cameraCenter = this.lookFrom.clone();
-
-    // Camera
-    const theta = degreesToRadians(this.vfov);
-    const h = Math.tan(theta / 2);
-    const viewportHeight = 2.0 * h * this.focusDist;
-    const viewportWidth = viewportHeight * (this.width / this.height);
-
-    // Calculate camera basis vectors for camera coordinates
-    const w = this.lookFrom.sub(this.lookAt).unit;
-    const u = Vec3.cross(this.vUp, w).unit;
-    const v = Vec3.cross(w, u);
-
-    const viewportU = u.k(viewportWidth);
-    const viewportV = v.k(-viewportHeight);
-
-    this.pixelDeltaU = viewportU.div(this.width);
-    this.pixelDeltaV = viewportV.div(this.height);
-
-    const viewportUpperLeft = this.cameraCenter
-      .sub(w.k(this.focusDist))
-      .sub(viewportU.div(2))
-      .sub(viewportV.div(2));
-    this.pixel00Loc = viewportUpperLeft.add(
-      this.pixelDeltaU.add(this.pixelDeltaV).div(2),
-    );
-
-    // camera defocus disk basis vectors
-    const defocusRadius =
-      this.focusDist * Math.tan(degreesToRadians(this.defocusAngle / 2));
-    this.defocusDiskU = u.k(defocusRadius);
-    this.defocusDiskV = v.k(defocusRadius);
-  }
-
-  render(world: Hittable) {
-    for (let j = 0; j <= this.height - 1; j++) {
+  render(world: Sphere[]) {
+    const { config } = this.state;
+    for (let j = 0; j <= config.height - 1; j++) {
       console.log(`Rendering scanline ${j}`);
-      for (let i = 0; i <= this.width - 1; i++) {
+      for (let i = 0; i <= config.width - 1; i++) {
         let pixelColor = vec3(0, 0, 0);
 
-        for (let sample = 0; sample < this.samplesPerPixel; sample++) {
-          const r = this.getRay(i, j);
-          pixelColor = pixelColor.add(this.rayColor(r, this.maxDepth, world));
+        for (let sample = 0; sample < config.samplesPerPixel; sample++) {
+          const r = getRay(this.state, i, j);
+          pixelColor = vecAdd(pixelColor, this.rayColor(r, config.maxDepth, world));
         }
 
-        writeColor(this.ctx, pixelColor.k(this.pixelSamplesScale), j, i);
+        writeColor(this.ctx, vecK(pixelColor, this.state.pixelSamplesScale), j, i);
       }
     }
     console.log("Done!");
   }
 
-  rayColor(r: Ray, depth: number, world: Hittable): Vec3 {
-    if (depth <= 0) return color(0, 0, 0);
-
-    const rec = new HitRecord();
-
-    const [hasHit, resultRec] = world.hit(r, interval(0.0001, Infinity), rec);
-    if (hasHit) {
-      let scattered: Ref<Ray> = {};
-      let attenuation: Ref<Vec3> = {};
-
-      if (
-        resultRec.material!.scatter(ref(r), resultRec, attenuation, scattered)
-      ) {
-        return this.rayColor(scattered.value!, depth - 1, world).vectorMultiply(
-          attenuation.value!,
-        );
-      } else {
-        return color(0, 0, 0);
-      }
-    }
-
-    const unitDirection = r.direction.unit;
-    const a = 0.5 * (unitDirection.y + 1.0);
-
-    return color(1.0, 1.0, 1.0)
-      .k(1 - a)
-      .add(color(0.5, 0.7, 1.0).k(a));
-  }
-
-  getRay(i: number, j: number) {
-    const offset = sampleSquare();
-
-    const pixelSample = this.pixel00Loc
-      .add(this.pixelDeltaU.k(i + offset.x))
-      .add(this.pixelDeltaV.k(j + offset.y));
-
-    const rayOrigin =
-      this.defocusAngle <= 0 ? this.cameraCenter : this.defocusDiskSample();
-    const rayDirection = pixelSample.sub(rayOrigin);
-
-    return ray(rayOrigin, rayDirection);
-  }
-
-  defocusDiskSample() {
-    const p = Vec3.randomInUnitDisk();
-    return this.cameraCenter
-      .add(this.defocusDiskU.k(p.x))
-      .add(this.defocusDiskV.k(p.y));
+  private rayColor(r: Ray, depth: number, world: Sphere[]): Vec3 {
+    return rayColor(r, depth, world);
   }
 }

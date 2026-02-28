@@ -1,160 +1,121 @@
 import { randomBetween, randomNum } from "./utils";
 
-export function vec3(x: number, y: number, z: number) {
-  return new Vec3(x, y, z);
+export interface Vec3 {
+  x: number;
+  y: number;
+  z: number;
 }
 
-export function point3(x: number, y: number, z: number) {
-  return new Vec3(x, y, z);
+export function vec3(x: number, y: number, z: number): Vec3 {
+  return { x, y, z };
 }
 
-export function color(r: number, g: number, b: number) {
-  return new Vec3(r, g, b);
+export function point3(x: number, y: number, z: number): Vec3 {
+  return { x, y, z };
 }
 
-export class Vec3 {
-  constructor(
-    public x: number,
-    public y: number,
-    public z: number,
-  ) {}
+export function color(r: number, g: number, b: number): Vec3 {
+  return { x: r, y: g, z: b };
+}
 
-  sub(v: Vec3): Vec3 {
-    const w = this.clone();
-    w.x -= v.x;
-    w.y -= v.y;
-    w.z -= v.z;
-    return w;
-  }
+export function vecSub(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
 
-  add(v: Vec3): Vec3 {
-    const w = this.clone();
-    w.x += v.x;
-    w.y += v.y;
-    w.z += v.z;
-    return w;
-  }
+export function vecAdd(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
 
-  dot(v: Vec3): number {
-    return this.x * v.x + this.y * v.y + this.z * v.z;
-  }
+export function vecDot(a: Vec3, b: Vec3): number {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
 
-  get unit(): Vec3 {
-    if (this.length === 0) {
-      throw new Error("Finding unit of length 0 vec");
-    }
-    return this.clone().k(1 / this.length);
-  }
+export function vecK(v: Vec3, n: number): Vec3 {
+  return { x: v.x * n, y: v.y * n, z: v.z * n };
+}
 
-  k(n: number): Vec3 {
-    const v = this.clone();
-    v.x *= n;
-    v.y *= n;
-    v.z *= n;
-    return v;
-  }
+export function vecDiv(v: Vec3, n: number): Vec3 {
+  return vecK(v, 1 / n);
+}
 
-  div(n: number): Vec3 {
-    return this.k(1 / n);
-  }
+export function vecMul(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x * b.x, y: a.y * b.y, z: a.z * b.z };
+}
 
-  vectorMultiply(v: Vec3) {
-    return vec3(v.x * this.x, v.y * this.y, v.z * this.z);
-  }
+export function vecLengthSquared(v: Vec3): number {
+  return vecDot(v, v);
+}
 
-  get [0]() {
-    return this.x;
-  }
-  get [1]() {
-    return this.y;
-  }
-  get [2]() {
-    return this.z;
-  }
+export function vecLength(v: Vec3): number {
+  return Math.sqrt(vecLengthSquared(v));
+}
 
-  toString() {
-    return `${this.x},${this.y},${this.z}`;
-  }
+export function vecUnit(v: Vec3): Vec3 {
+  const len = vecLength(v);
+  if (len === 0) throw new Error("Finding unit of length 0 vec");
+  return vecK(v, 1 / len);
+}
 
-  clone(): Vec3 {
-    return new Vec3(this.x, this.y, this.z);
-  }
+export function vecNearZero(v: Vec3): boolean {
+  const s = 1e-8;
+  return Math.abs(v.x) < s && Math.abs(v.y) < s && Math.abs(v.z) < s;
+}
 
-  get lengthSquared() {
-    return Vec3.dot(this, this);
-  }
+export function vecReflect(v: Vec3, n: Vec3): Vec3 {
+  return vecSub(v, vecK(n, vecDot(v, n) * 2));
+}
 
-  get length() {
-    return Math.sqrt(this.lengthSquared);
-  }
+export function vecRefract(uv: Vec3, n: Vec3, etaiOverEtat: number): Vec3 {
+  const cosTheta = Math.min(vecDot(vecK(uv, -1), n), 1.0);
+  const rOutPerp = vecK(vecAdd(uv, vecK(n, cosTheta)), etaiOverEtat);
+  const rOutParallel = vecK(n, -Math.sqrt(Math.abs(1 - vecLengthSquared(rOutPerp))));
+  return vecAdd(rOutPerp, rOutParallel);
+}
 
-  nearZero() {
-    const s = 1e-8;
-    return Math.abs(this.x) < s && Math.abs(this.y) < s && Math.abs(this.z) < s;
-  }
+export function vecCross(u: Vec3, v: Vec3): Vec3 {
+  return vec3(
+    u.y * v.z - u.z * v.y,
+    u.z * v.x - u.x * v.z,
+    u.x * v.y - u.y * v.x,
+  );
+}
 
-  static dot(v: Vec3, u: Vec3): number {
-    return v.x * u.x + v.y * u.y + v.z * u.z;
-  }
+export function vecRandom(): Vec3 {
+  return vec3(randomNum(), randomNum(), randomNum());
+}
 
-  static reflect(v: Vec3, n: Vec3) {
-    // v - 2*dot(v,n)*n
-    return v.sub(n.k(this.dot(v, n) * 2));
-  }
+export function vecRandomBetween(min: number, max: number): Vec3 {
+  return vec3(
+    randomBetween(min, max),
+    randomBetween(min, max),
+    randomBetween(min, max),
+  );
+}
 
-  static random() {
-    return vec3(randomNum(), randomNum(), randomNum());
-  }
-
-  static randomBetween(min: number, max: number) {
-    return vec3(
-      randomBetween(min, max),
-      randomBetween(min, max),
-      randomBetween(min, max),
-    );
-  }
-
-  static randomUnitVector() {
-    while (true) {
-      const p = this.randomBetween(-1, 1);
-      const { lengthSquared } = p;
-      // Javascript numbers are double (64-bit) so we can use the same value for minimum
-      if (1e-160 < lengthSquared && lengthSquared <= 1) {
-        return p.div(Math.sqrt(lengthSquared));
-      }
+export function vecRandomUnitVector(): Vec3 {
+  while (true) {
+    const p = vecRandomBetween(-1, 1);
+    const ls = vecLengthSquared(p);
+    if (1e-160 < ls && ls <= 1) {
+      return vecDiv(p, Math.sqrt(ls));
     }
   }
+}
 
-  static randomOnHemisphere(normal: Vec3) {
-    const onUnitSphere = this.randomUnitVector();
-    if (this.dot(onUnitSphere, normal) > 0.0) {
-      return onUnitSphere;
-    } else {
-      return onUnitSphere.k(-1);
+export function vecRandomOnHemisphere(normal: Vec3): Vec3 {
+  const onUnitSphere = vecRandomUnitVector();
+  if (vecDot(onUnitSphere, normal) > 0.0) {
+    return onUnitSphere;
+  } else {
+    return vecK(onUnitSphere, -1);
+  }
+}
+
+export function vecRandomInUnitDisk(): Vec3 {
+  while (true) {
+    const p = vec3(randomBetween(-1, 1), randomBetween(-1, 1), 0);
+    if (vecLengthSquared(p) < 1) {
+      return p;
     }
-  }
-
-  static randomInUnitDisk() {
-    while (true) {
-      const p = vec3(randomBetween(-1, 1), randomBetween(-1, 1), 0);
-      if (p.lengthSquared < 1) {
-        return p;
-      }
-    }
-  }
-
-  static refract(uv: Vec3, n: Vec3, etaiOverEtat: number) {
-    const cosTheta = Math.min(this.dot(uv.k(-1), n), 1.0);
-    const rOutPerp = uv.add(n.k(cosTheta)).k(etaiOverEtat);
-    const rOutParallel = n.k(-Math.sqrt(Math.abs(1 - rOutPerp.lengthSquared)));
-    return rOutPerp.add(rOutParallel);
-  }
-
-  static cross(u: Vec3, v: Vec3) {
-    return vec3(
-      u.y * v.z - u.z * v.y,
-      u.z * v.x - u.x * v.z,
-      u.x * v.y - u.y * v.x,
-    );
   }
 }
