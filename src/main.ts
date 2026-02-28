@@ -2,7 +2,15 @@ import { Camera } from "./camera";
 import { dielectric, lambertian, metal } from "./material";
 import { sphere, Sphere } from "./sphere";
 import { randomBetween, randomNum } from "./utils";
-import { color, point3, vecMul, vecRandom, vecRandomBetween, vecSub, vecLength } from "./vec3";
+import {
+  color,
+  point3,
+  vecMul,
+  vecRandom,
+  vecRandomBetween,
+  vecSub,
+  vecLength,
+} from "./vec3";
 
 function main() {
   const world: Sphere[] = [];
@@ -41,9 +49,13 @@ function main() {
   const material3 = metal(color(0.7, 0.6, 0.5), 0.0);
   world.push(sphere(point3(4, 1, 0), 1.0, material3));
 
+  const width = document.querySelector<HTMLInputElement>("input")!;
+
+  const aspectRatio = 16 / 9;
+
   const cam = new Camera({
-    width: 200,
-    aspectRatio: 16 / 9,
+    width: Number(width.value),
+    aspectRatio,
     samplesPerPixel: 100,
     maxDepth: 50,
     vfov: 20,
@@ -53,7 +65,7 @@ function main() {
     focusDist: 10,
   });
 
-  cam.render(world);
+  cam.renderParallel(world);
 }
 
 document.getElementById("button")!.onclick = main;
