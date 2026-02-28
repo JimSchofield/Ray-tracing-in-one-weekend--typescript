@@ -65,7 +65,7 @@ function main() {
     focusDist: 10,
   });
 
-  cam.renderParallel(world);
+  cam.renderParallelGPU(world);
 }
 
 document.getElementById("button")!.onclick = main;

@@ -8,6 +8,14 @@ export interface RenderWorkerInput {
   endRow: number;
 }
 
+export interface GpuRenderWorkerInput {
+  camState: CameraState;
+  world: Sphere[];
+  startRow: number;
+  endRow: number;
+  rngSeed: number;
+}
+
 export interface RenderWorkerOutput {
   startRow: number;
   endRow: number;

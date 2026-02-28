@@ -19,7 +19,7 @@ import {
   vecSub,
   vecUnit,
 } from "./vec3";
-import { RenderWorkerInput, RenderWorkerOutput } from "./worker-types";
+import { GpuRenderWorkerInput, RenderWorkerInput, RenderWorkerOutput } from "./worker-types";
 
 const sampleSquare = () => vec3(randomNum() - 0.5, randomNum() - 0.5, 0);
 
@@ -240,6 +240,101 @@ export class Camera {
         }
       };
     }
+  }
+
+  renderParallelGPU(world: Sphere[]) {
+    const { config } = this.state;
+    // Use fewer workers than CPU cores since they share the GPU
+    const numWorkers = Math.min(navigator.hardwareConcurrency || 4, 4);
+    const rowsPerWorker = Math.ceil(config.height / numWorkers);
+    let completedBands = 0;
+    let actualWorkers = 0;
+
+    console.log(`Spawning ${numWorkers} GPU workers for ${config.height} rows`);
+
+    for (let w = 0; w < numWorkers; w++) {
+      const startRow = w * rowsPerWorker;
+      const endRow = Math.min(startRow + rowsPerWorker, config.height);
+      if (startRow >= config.height) break;
+      actualWorkers++;
+
+      const worker = new Worker(
+        new URL("./gpu-render-worker.ts", import.meta.url),
+        { type: "module" },
+      );
+
+      const msg: GpuRenderWorkerInput = {
+        camState: this.state,
+        world,
+        startRow,
+        endRow,
+        rngSeed: w * 12345 + 1,
+      };
+
+      worker.postMessage(msg);
+
+      worker.onmessage = (e: MessageEvent<RenderWorkerOutput & { error?: string }>) => {
+        if (e.data.error) {
+          console.warn(`GPU worker: ${e.data.error}, falling back to CPU`);
+          worker.terminate();
+          this.renderCPUBand(world, e.data.startRow, e.data.endRow, () => {
+            completedBands++;
+            if (completedBands === actualWorkers) console.log("Done!");
+          });
+          return;
+        }
+
+        const { startRow: sr, endRow: er, pixels } = e.data;
+        const bandHeight = er - sr;
+        const imageData = new ImageData(pixels, config.width, bandHeight);
+        this.ctx.putImageData(imageData, 0, sr);
+
+        completedBands++;
+        console.log(`GPU band ${completedBands}/${actualWorkers} done (rows ${sr}-${er})`);
+
+        worker.terminate();
+
+        if (completedBands === actualWorkers) {
+          console.log("Done!");
+        }
+      };
+
+      worker.onerror = (err) => {
+        console.error(`GPU worker ${w} error:`, err);
+        worker.terminate();
+      };
+    }
+  }
+
+  private renderCPUBand(
+    world: Sphere[],
+    startRow: number,
+    endRow: number,
+    onComplete: () => void,
+  ) {
+    const worker = new Worker(
+      new URL("./render-worker.ts", import.meta.url),
+      { type: "module" },
+    );
+
+    const msg: RenderWorkerInput = {
+      camState: this.state,
+      world,
+      startRow,
+      endRow,
+    };
+
+    worker.postMessage(msg);
+
+    worker.onmessage = (e: MessageEvent<RenderWorkerOutput>) => {
+      const { startRow: sr, endRow: er, pixels } = e.data;
+      const bandHeight = er - sr;
+      const imageData = new ImageData(pixels, this.state.config.width, bandHeight);
+      this.ctx.putImageData(imageData, 0, sr);
+      console.log(`CPU fallback band done (rows ${sr}-${er})`);
+      worker.terminate();
+      onComplete();
+    };
   }
 
   private rayColor(r: Ray, depth: number, world: Sphere[]): Vec3 {
